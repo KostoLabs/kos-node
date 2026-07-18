@@ -1,0 +1,114 @@
+# ============================================================
+# elements.conf — TEMPLATE PROD (chaîne fédérée « kosto »)
+#
+# NE PAS UTILISER TEL QUEL. Procédure complète : README §« Constitution
+# de la fédération prod ». Résumé :
+#   1. chaque signataire génère sa clé  → scripts/federation/gen-signer-key.sh
+#   2. assembler le multisig K-de-N     → scripts/federation/assemble-signblockscript.py
+#   3. remplacer les __PLACEHOLDERS__ ci-dessous (fichier copié hors
+#      git, p. ex. secrets/elements-kosto.conf, ou variables du .env
+#      consommées par le profil compose `prod-template`)
+#   4. cérémonie de démarrage (genèse identique sur tous les nœuds).
+#
+# RÈGLE ABSOLUE : les paramètres marqués [GENESIS] sont engagés dans le
+# bloc de genèse. Ils doivent être STRICTEMENT IDENTIQUES sur tous les
+# nœuds de la fédération et NE PEUVENT PLUS CHANGER après le démarrage
+# (sauf transition dynafed pour la composition de la fédération).
+# ============================================================
+
+# Nom de la chaîne custom. [GENESIS] — le nom participe au calcul du
+# genesis : « kosto » donne une chaîne unique au monde.
+chain=kosto
+
+[kosto]
+
+# ================= CONSENSUS / CHAINPARAMS =================
+
+# [GENESIS] Blocs signés par une fédération (pas de preuve de travail).
+con_signed_blocks=1
+
+# [GENESIS] Script de signature des blocs : multisig K-de-N des
+# signataires de la fédération. Produit par
+# scripts/federation/assemble-signblockscript.py à partir des clés
+# publiques recueillies lors de la cérémonie (README §Fédération).
+# Exemple (2-de-3) : 5221<pub1>21<pub2>21<pub3>53ae
+signblockscript=__SIGNBLOCKSCRIPT_HEX__
+
+# [GENESIS] Taille maximale (octets) du témoin de signature d'un bloc.
+# Recommandation calculée par assemble-signblockscript.py (≈ 74×K + marge).
+con_max_block_sig_size=__MAX_BLOCK_SIG_SIZE__
+
+# [GENESIS] Chaîne AUTONOME : aucun peg Bitcoin, aucune chaîne parente.
+# Les trois options vont ensemble (con_has_parent_chain=0 exige un
+# parentgenesisblockhash vide).
+validatepegin=0
+con_has_parent_chain=0
+parentgenesisblockhash=
+
+# [GENESIS] Aucun actif créé au genesis : les récépissés-warrants et le
+# KOS sont émis explicitement (issueasset) après le démarrage, avec des
+# jetons de ré-émission sous contrôle de la fédération.
+initialfreecoins=0
+initialreissuancetokens=0
+
+# [GENESIS] Aucune subvention de bloc (pas d'inflation de l'actif de base).
+con_blocksubsidy=0
+
+# Le wallet ne s'approprie PAS les sorties anyone-can-spend (sécurité).
+anyonecanspendaremine=0
+
+# [GENESIS] Espacement cible des blocs, en secondes.
+con_npowtargetspacing=60
+
+# ---------------- Dynamic Federations (dynafed) ----------------
+# Sur une chaîne custom, le déploiement « dynafed » est ACTIF DÈS LE
+# GENESIS par défaut (ALWAYS_ACTIVE) : la composition de la fédération
+# (signblockscript) peut évoluer par transition votée, sans hard fork.
+# - Signalisation par les signataires (défaut : 1) :
+con_dyna_deploy_signal=1
+# - Longueur d'époque : fenêtre (en blocs) de vote/application des
+#   transitions de fédération. Ex. 10080 ≈ 1 semaine à 60 s/bloc.
+dynamic_epoch_length=10080
+# - Nombre d'époques pendant lesquelles un ancien fedpegscript reste
+#   valide (sans peg, la valeur par défaut convient) :
+# total_valid_epochs=2
+# - Pour DIFFÉRER l'activation de dynafed (déconseillé sur une chaîne
+#   neuve), utiliser : evbparams=dynafed:<start>:<end>:<period>:<threshold>
+
+# ================= RPC =================
+
+# Jamais de mot de passe en clair : générer une ligne rpcauth via
+# l'outil officiel (contrib/ dans les sources d'Elements Core) :
+#   python3 share/rpcauth/rpcauth.py <user>
+# puis coller la ligne produite :
+rpcauth=__RPCAUTH_LINE__
+
+rpcport=7041
+# N'écouter que localement ; les services co-localisés (electrs,
+# supervision) passent par localhost ou un tunnel mTLS.
+rpcbind=127.0.0.1
+rpcallowip=127.0.0.1
+
+# ================= INDEXATION =================
+# Requis pour l'explorateur et l'audit (préservation de l'historique).
+txindex=1
+
+# ================= TRANSACTIONS CONFIDENTIELLES =================
+blindedaddresses=1
+
+# ================= RÉSEAU P2P =================
+listen=1
+port=7042
+# Fédération privée : connexions sortantes UNIQUEMENT vers les pairs
+# connus de la fédération (une ligne par pair, DNS interne FR/UE) :
+# connect=node2.kosto.interne:7042
+# connect=node3.kosto.interne:7042
+# Si le nœud accepte des connexions entrantes de pairs identifiés :
+# whitelist=10.x.y.z
+
+# ================= JOURNALISATION / EXPLOITATION =================
+# Horodatage UTC des logs (traçabilité / certification)
+logtimestamps=1
+# shrinkdebugfile=0 pour conserver l'intégralité des logs (archivage
+# externe recommandé — voir README §Certification)
+shrinkdebugfile=0

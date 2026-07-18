@@ -1,0 +1,41 @@
+# ============================================================
+# arion-elements-node — .gitignore
+# Règle d'or : AUCUN secret, AUCUNE clé, AUCUN binaire dans git.
+# ============================================================
+
+# --- Environnement local (secrets) ---
+.env
+.env.*
+!.env.example
+
+# --- Clés, wallets, matériel cryptographique ---
+secrets/
+*.wif
+*.key
+*.pem
+*.p12
+*.cookie
+wallet.dat
+*.bak
+
+# --- Données et sauvegardes locales ---
+backups/*
+!backups/.gitkeep
+data/
+*.tar.gz
+*.zip
+
+# --- Binaires ---
+*.o
+*.so
+*.exe
+elementsd
+elements-cli
+bin/
+
+# --- Divers ---
+*.log
+*.swp
+*.tmp
+.DS_Store
+__pycache__/

@@ -1,0 +1,248 @@
+# ============================================================
+# arion-elements-node — KostoLabs / Arion
+# Infrastructure d'une chaîne Elements AUTONOME (sans peg Bitcoin,
+# sans le réseau Liquid public, aucun service Blockstream appelé).
+#
+# Profils :
+#   dev           → elementsd (elementsregtest) + electrs + esplora
+#                   `make up` ; démarrage from scratch < 2 min
+#   prod-template → squelette de nœud pour la chaîne fédérée « kosto »
+#                   (échoue volontairement tant que la fédération n'est
+#                   pas constituée — voir README §Fédération)
+#
+# Tous les paramètres viennent de .env (cf. .env.example).
+# AUCUN secret dans ce fichier.
+# ============================================================
+
+services:
+  # ----------------------------------------------------------
+  # DEV — nœud Elements regtest, signataire unique (OP_TRUE),
+  # blocs générés à la demande (make generate N)
+  # ----------------------------------------------------------
+  elementsd:
+    profiles: ["dev"]
+    build:
+      context: docker/elements
+      args:
+        ELEMENTS_VERSION: ${ELEMENTS_VERSION:-23.3.3}
+        DOWNLOAD_BASE: ${ELEMENTS_DOWNLOAD_BASE:-https://github.com/ElementsProject/elements/releases/download}
+    image: kostolabs/elementsd:${ELEMENTS_VERSION:-23.3.3}
+    container_name: arion-elementsd-dev
+    restart: unless-stopped
+    # Laisse le temps à elementsd d'écrire proprement ses bases à l'arrêt.
+    stop_grace_period: 1m
+    command:
+      - -chain=${ELEMENTS_DEV_CHAIN:-elementsregtest}
+      - -conf=/etc/elements/elements.conf
+      # Credentials injectés depuis .env — jamais dans un fichier commité.
+      - -rpcuser=${ELEMENTS_RPC_USER:?Definir ELEMENTS_RPC_USER dans .env}
+      - -rpcpassword=${ELEMENTS_RPC_PASSWORD:?Definir ELEMENTS_RPC_PASSWORD dans .env}
+    environment:
+      # Utilisés par scripts/healthcheck.sh à l'intérieur du conteneur.
+      ELEMENTS_CHAIN: ${ELEMENTS_DEV_CHAIN:-elementsregtest}
+      # Port RPC INTERNE au conteneur (fixé par config/elements-dev.conf).
+      ELEMENTS_RPC_PORT: "18884"
+      ELEMENTS_RPC_USER: ${ELEMENTS_RPC_USER}
+      ELEMENTS_RPC_PASSWORD: ${ELEMENTS_RPC_PASSWORD}
+      HEALTH_MIN_HEIGHT: ${HEALTH_MIN_HEIGHT:-0}
+      HEALTH_MAX_BLOCK_AGE: ${HEALTH_MAX_BLOCK_AGE:-0}
+      HEALTH_DISK_WARN: ${HEALTH_DISK_WARN:-80}
+      HEALTH_DISK_CRIT: ${HEALTH_DISK_CRIT:-90}
+      HEALTH_MIN_PEERS: ${HEALTH_MIN_PEERS:-0}
+    ports:
+      # RPC exposé uniquement en local (18884 = continuité de l'existant)
+      - "127.0.0.1:${ELEMENTS_RPC_PORT:-18884}:18884"
+    volumes:
+      - elements-dev-data:/data
+      - ./config/elements-dev.conf:/etc/elements/elements.conf:ro
+      - ./scripts:/scripts:ro
+    healthcheck:
+      test: ["CMD", "/scripts/healthcheck.sh", "--quiet"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    networks: [arion]
+
+  # ----------------------------------------------------------
+  # DEV — electrs : indexeur + API REST « esplora » + Electrum,
+  # branché sur le nœud dev. Auto-hébergé : image publique Vulpem
+  # par défaut (aucun service Blockstream), build souverain possible
+  # via docker/electrs/Dockerfile (voir .env.example).
+  # ----------------------------------------------------------
+  electrs:
+    profiles: ["dev"]
+    image: ${ELECTRS_IMAGE:-ghcr.io/vulpemventures/electrs-liquid:latest}
+    container_name: arion-electrs-dev
+    restart: unless-stopped
+    depends_on:
+      elementsd:
+        condition: service_healthy
+    # L'image Vulpem place le binaire dans /build ; l'image souveraine
+    # (docker/electrs) l'installe dans le PATH — l'entrypoint explicite
+    # fonctionne dans les deux cas.
+    entrypoint: ["/build/electrs"]
+    command:
+      - -v
+      # « liquidregtest » : paramètres d'adressage identiques à
+      # elementsregtest (préfixes ert/el) — requis par electrs qui ne
+      # connaît que les noms de réseaux liquid*.
+      - --network=liquidregtest
+      - --daemon-rpc-addr=elementsd:18884
+      # Auth RPC par variables d'env (mêmes credentials que le nœud).
+      - --cookie=${ELEMENTS_RPC_USER}:${ELEMENTS_RPC_PASSWORD}
+      # Import par RPC : pas de lecture directe du datadir du nœud.
+      - --jsonrpc-import
+      - --db-dir=/data
+      - --http-addr=0.0.0.0:3002
+      - --electrum-rpc-addr=0.0.0.0:50001
+      # CORS ouvert : l'UI esplora interroge l'API depuis le navigateur.
+      - --cors=*
+    ports:
+      - "127.0.0.1:${ELECTRS_REST_PORT:-3002}:3002"
+      - "127.0.0.1:${ELECTRS_ELECTRUM_PORT:-50001}:50001"
+    volumes:
+      - electrs-dev-data:/data
+    networks: [arion]
+
+  # ----------------------------------------------------------
+  # DEV — esplora : interface web de l'explorateur (statique),
+  # servie en local et interrogeant l'API electrs ci-dessus.
+  # ----------------------------------------------------------
+  esplora:
+    profiles: ["dev"]
+    image: ${ESPLORA_IMAGE:-ghcr.io/vulpemventures/esplora:latest}
+    container_name: arion-esplora-dev
+    restart: unless-stopped
+    depends_on:
+      - electrs
+    environment:
+      # URL de l'API vue DEPUIS LE NAVIGATEUR de l'utilisateur.
+      API_URL: http://localhost:${ELECTRS_REST_PORT:-3002}
+    ports:
+      - "127.0.0.1:${ESPLORA_UI_PORT:-5001}:5000"
+    networks: [arion]
+
+  # ----------------------------------------------------------
+  # PROD-TEMPLATE — squelette de nœud de la chaîne fédérée « kosto ».
+  #
+  # NE DÉMARRE PAS EN L'ÉTAT (c'est voulu) : tant que les variables
+  # KOSTO_* du .env sont vides, le conteneur s'arrête (et redémarre)
+  # avec un message explicite dans `docker compose logs`. Elles se
+  # renseignent après la cérémonie de constitution de la fédération
+  # (README §Fédération) :
+  #   1. gen-signer-key.sh sur la machine (offline) de chaque signataire
+  #   2. assemble-signblockscript.py → KOSTO_SIGNBLOCKSCRIPT
+  #      + KOSTO_MAX_BLOCK_SIG_SIZE
+  #   3. rpcauth (hash salé) → KOSTO_RPCAUTH
+  #   4. démarrage simultané des N nœuds avec des paramètres IDENTIQUES
+  #      (le genesis en découle) puis production du premier bloc signé.
+  #
+  # AUCUNE clé privée ne transite par ce fichier : les clés des
+  # signataires restent sur leurs machines (idéalement HSM), seules
+  # les clés PUBLIQUES entrent dans le signblockscript.
+  # ----------------------------------------------------------
+  elementsd-kosto:
+    profiles: ["prod-template"]
+    build:
+      context: docker/elements
+      args:
+        ELEMENTS_VERSION: ${ELEMENTS_VERSION:-23.3.3}
+        DOWNLOAD_BASE: ${ELEMENTS_DOWNLOAD_BASE:-https://github.com/ElementsProject/elements/releases/download}
+    image: kostolabs/elementsd:${ELEMENTS_VERSION:-23.3.3}
+    container_name: arion-elementsd-kosto
+    restart: unless-stopped
+    stop_grace_period: 5m
+    # Préflight : refuse de lancer elementsd tant que la cérémonie de
+    # fédération n'a pas été menée (variables KOSTO_* absentes du .env).
+    # Le message d'erreur apparaît dans `docker compose logs`.
+    # (Un simple `${VAR:?}` compose casserait aussi le profil dev :
+    # l'interpolation précède le filtrage par profil.)
+    entrypoint:
+      - /bin/bash
+      - -ec
+      - |
+        : "$${KOSTO_SIGNBLOCKSCRIPT:?Executer la ceremonie de federation (README section 6) puis renseigner KOSTO_SIGNBLOCKSCRIPT dans .env}"
+        : "$${KOSTO_MAX_BLOCK_SIG_SIZE:?Renseigner KOSTO_MAX_BLOCK_SIG_SIZE (calcule par assemble-signblockscript.py)}"
+        : "$${KOSTO_RPCAUTH:?Generer une ligne rpcauth (share/rpcauth/rpcauth.py) et renseigner KOSTO_RPCAUTH (echapper chaque dollar en double dollar dans .env)}"
+        exec elementsd -datadir=/data -printtoconsole "$$@"
+      - elementsd-kosto
+    command:
+      # Chaîne custom « kosto » — paramètres de consensus [GENESIS] :
+      # identiques sur tous les nœuds, immuables après démarrage.
+      - -chain=${KOSTO_CHAIN_NAME:-kosto}
+      - -con_signed_blocks=1
+      - -signblockscript=${KOSTO_SIGNBLOCKSCRIPT:-}
+      - -con_max_block_sig_size=${KOSTO_MAX_BLOCK_SIG_SIZE:-}
+      # Chaîne autonome : pas de peg, pas de chaîne parente.
+      - -validatepegin=0
+      - -con_has_parent_chain=0
+      - -parentgenesisblockhash=
+      # Pas d'actifs au genesis, pas de subvention de bloc.
+      - -initialfreecoins=0
+      - -initialreissuancetokens=0
+      - -con_blocksubsidy=0
+      - -anyonecanspendaremine=0
+      # Espacement cible des blocs (s).
+      - -con_npowtargetspacing=${KOSTO_BLOCK_SPACING:-60}
+      # dynafed : actif dès le genesis sur une chaîne custom (défaut).
+      - -con_dyna_deploy_signal=1
+      - -dynamic_epoch_length=10080
+      # Auth RPC par hash salé (rpcauth), jamais de mot de passe en clair.
+      # NB : dans .env, échapper les `$` de la ligne rpcauth en `$$`.
+      - -rpcauth=${KOSTO_RPCAUTH:-}
+      - -rpcbind=0.0.0.0
+      # Le port RPC n'est publié que sur 127.0.0.1 côté hôte ; vu du
+      # conteneur, ce trafic arrive depuis la passerelle Docker (réseau
+      # privé), d'où l'autorisation des plages RFC1918 uniquement.
+      - -rpcallowip=127.0.0.1
+      - -rpcallowip=10.0.0.0/8
+      - -rpcallowip=172.16.0.0/12
+      - -rpcallowip=192.168.0.0/16
+      - -rpcport=7041
+      - -txindex=1
+      - -blindedaddresses=1
+      - -listen=1
+      - -port=7042
+      - -logtimestamps=1
+      # Pairs de la fédération (répéter -connect= par pair, DNS FR/UE) :
+      # - -connect=node2.kosto.interne:7042
+    environment:
+      # Pour le préflight de l'entrypoint ci-dessus.
+      KOSTO_SIGNBLOCKSCRIPT: ${KOSTO_SIGNBLOCKSCRIPT:-}
+      KOSTO_MAX_BLOCK_SIG_SIZE: ${KOSTO_MAX_BLOCK_SIG_SIZE:-}
+      KOSTO_RPCAUTH: ${KOSTO_RPCAUTH:-}
+      # Utilisés par scripts/healthcheck.sh (auth par cookie du datadir :
+      # rpcauth laisse la génération du .cookie active, contrairement à
+      # rpcpassword).
+      ELEMENTS_CHAIN: ${KOSTO_CHAIN_NAME:-kosto}
+      ELEMENTS_RPC_PORT: "7041"
+      HEALTH_MIN_HEIGHT: ${HEALTH_MIN_HEIGHT:-0}
+      HEALTH_MAX_BLOCK_AGE: ${HEALTH_MAX_BLOCK_AGE:-0}
+      HEALTH_DISK_WARN: ${HEALTH_DISK_WARN:-80}
+      HEALTH_DISK_CRIT: ${HEALTH_DISK_CRIT:-90}
+      HEALTH_MIN_PEERS: ${HEALTH_MIN_PEERS:-0}
+    ports:
+      - "127.0.0.1:${KOSTO_RPC_PORT:-7041}:7041"
+      # P2P : à exposer sur le réseau privé inter-nœuds de la fédération
+      # (VPN/WireGuard entre datacenters FR/UE), pas sur Internet.
+      - "${KOSTO_P2P_PORT:-7042}:7042"
+    volumes:
+      - elements-kosto-data:/data
+      - ./scripts:/scripts:ro
+    healthcheck:
+      test: ["CMD", "/scripts/healthcheck.sh", "--quiet"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 1m
+    networks: [arion]
+
+volumes:
+  elements-dev-data:
+  electrs-dev-data:
+  elements-kosto-data:
+
+networks:
+  arion:
+    driver: bridge
