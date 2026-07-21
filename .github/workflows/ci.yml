@@ -1,0 +1,83 @@
+# ============================================================
+# kos-node — CI/CD
+#
+# Triggers: push to dev, PR to dev
+#   smoke-test  : build the elementsd image, boot the dev profile,
+#                 wait for health, run ./scripts/smoke-test.sh.
+#   build-push  : (push to dev only) build & push elementsd and
+#                 electrs images to GHCR (ghcr.io/kostolabs/*).
+#
+# The Dockerfile (docker/elements/Dockerfile) uses ARG
+# ELEMENTS_VERSION and downloads the official Elements Core
+# binaries with SHA256 verification, so the build is self-
+# contained — no external image dependency for elementsd.
+# ============================================================
+name: CI
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [dev]
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .env from example
+        run: cp .env.example .env
+
+      - name: Build elementsd image and start dev profile
+        run: docker compose --profile dev up -d --build
+
+      - name: Wait for elementsd to be healthy
+        run: |
+          timeout 120 bash -c \
+            'until docker inspect --format={{.State.Health.Status}} arion-elementsd-dev | grep -q healthy; do sleep 2; done'
+
+      - name: Run smoke test
+        run: docker exec arion-elementsd-dev /scripts/smoke-test.sh
+
+      - name: Tear down
+        if: always()
+        run: docker compose --profile dev down -v
+
+  build-push:
+    # Only on push to dev (not on PRs) and only after smoke passes.
+    if: github.event_name == 'push'
+    needs: smoke-test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Build & push elementsd (versioned + dev-latest)
+        run: |
+          docker build \
+            --build-arg ELEMENTS_VERSION=23.3.3 \
+            -t ghcr.io/kostolabs/elementsd:23.3.3 \
+            -t ghcr.io/kostolabs/elementsd:dev-latest \
+            docker/elements
+          docker push ghcr.io/kostolabs/elementsd:23.3.3
+          docker push ghcr.io/kostolabs/elementsd:dev-latest
+
+      - name: Build & push electrs (sovereign image, if Dockerfile present)
+        run: |
+          if [ -s docker/electrs/Dockerfile ]; then
+            docker build \
+              -t ghcr.io/kostolabs/electrs-kosto:dev-latest \
+              docker/electrs
+            docker push ghcr.io/kostolabs/electrs-kosto:dev-latest
+          else
+            echo "docker/electrs/Dockerfile absent ou vide — image electrs non construite."
+          fi
