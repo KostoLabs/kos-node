@@ -1,0 +1,13 @@
+# Dependabot — surveille les images Docker tierces référencées
+# dans docker-compose.yml (electrs et esplora, images publiques
+# ghcr.io/vulpemventures/*). Mises à jour hebdomadaires.
+version: 2
+updates:
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - docker
