@@ -43,20 +43,15 @@ jobs:
       - name: Mine 101 blocks to activate initialfreecoins
         run: |
           source .env
-          ADDR=$(docker exec arion-elementsd-dev elements-cli \
-            -chain=elementsregtest -rpcport=18884 \
-            -rpcuser="$ELEMENTS_RPC_USER" -rpcpassword="$ELEMENTS_RPC_PASSWORD" \
-            getnewaddress)
+          RPC="elements-cli -chain=elementsregtest -rpcport=18884 -rpcuser=$ELEMENTS_RPC_USER -rpcpassword=$ELEMENTS_RPC_PASSWORD"
+          # Create wallet if it doesn't exist
+          docker exec arion-elementsd-dev $RPC -rpcwallet=main createwallet main 2>/dev/null || \
+            docker exec arion-elementsd-dev $RPC -rpcwallet=main loadwallet main 2>/dev/null || true
+          # Generate 101 blocks to a new address
+          ADDR=$(docker exec arion-elementsd-dev $RPC -rpcwallet=main getnewaddress)
           echo "Mining 101 blocks to $ADDR..."
-          docker exec arion-elementsd-dev elements-cli \
-            -chain=elementsregtest -rpcport=18884 \
-            -rpcuser="$ELEMENTS_RPC_USER" -rpcpassword="$ELEMENTS_RPC_PASSWORD" \
-            generatetoaddress 101 "$ADDR"
-          echo "Done. Block height:"
-          docker exec arion-elementsd-dev elements-cli \
-            -chain=elementsregtest -rpcport=18884 \
-            -rpcuser="$ELEMENTS_RPC_USER" -rpcpassword="$ELEMENTS_RPC_PASSWORD" \
-            getblockcount
+          docker exec arion-elementsd-dev $RPC -rpcwallet=main generatetoaddress 101 "$ADDR"
+          echo "Block height: $(docker exec arion-elementsd-dev $RPC getblockcount)"
 
       - name: Run smoke test
         run: ./scripts/smoke-test.sh
