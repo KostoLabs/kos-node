@@ -41,7 +41,7 @@ jobs:
             'until docker inspect --format={{.State.Health.Status}} arion-elementsd-dev | grep -q healthy; do sleep 2; done'
 
       - name: Run smoke test
-        run: docker exec arion-elementsd-dev /scripts/smoke-test.sh
+        run: ./scripts/smoke-test.sh
 
       - name: Tear down
         if: always()
