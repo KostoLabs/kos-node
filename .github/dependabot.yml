@@ -3,8 +3,21 @@
 # ghcr.io/vulpemventures/*). Mises à jour hebdomadaires.
 version: 2
 updates:
+  # elementsd — image construite localement (docker/elements/Dockerfile),
+  # base debian:bookworm-slim + téléchargement des binaires officiels.
   - package-ecosystem: docker
-    directory: /
+    directory: /docker/elements
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - docker
+
+  # electrs — build souverain optionnel (docker/electrs/Dockerfile),
+  # base rust:1.82-bookworm + debian:bookworm-slim.
+  - package-ecosystem: docker
+    directory: /docker/electrs
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
