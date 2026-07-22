@@ -43,14 +43,20 @@ jobs:
       - name: Mine 101 blocks to activate initialfreecoins
         run: |
           source .env
-          docker compose -T --profile dev exec elementsd elements-cli \
+          ADDR=$(docker exec arion-elementsd-dev elements-cli \
             -chain=elementsregtest -rpcport=18884 \
             -rpcuser="$ELEMENTS_RPC_USER" -rpcpassword="$ELEMENTS_RPC_PASSWORD" \
-            generatetoaddress 101 \
-            $(docker compose -T --profile dev exec -T elementsd elements-cli \
-              -chain=elementsregtest -rpcport=18884 \
-              -rpcuser="$ELEMENTS_RPC_USER" -rpcpassword="$ELEMENTS_RPC_PASSWORD" \
-              getnewaddress)
+            getnewaddress)
+          echo "Mining 101 blocks to $ADDR..."
+          docker exec arion-elementsd-dev elements-cli \
+            -chain=elementsregtest -rpcport=18884 \
+            -rpcuser="$ELEMENTS_RPC_USER" -rpcpassword="$ELEMENTS_RPC_PASSWORD" \
+            generatetoaddress 101 "$ADDR"
+          echo "Done. Block height:"
+          docker exec arion-elementsd-dev elements-cli \
+            -chain=elementsregtest -rpcport=18884 \
+            -rpcuser="$ELEMENTS_RPC_USER" -rpcpassword="$ELEMENTS_RPC_PASSWORD" \
+            getblockcount
 
       - name: Run smoke test
         run: ./scripts/smoke-test.sh
