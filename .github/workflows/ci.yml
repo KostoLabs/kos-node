@@ -54,7 +54,23 @@ jobs:
           echo "Block height: $(docker exec arion-elementsd-dev $RPC getblockcount)"
 
       - name: Run smoke test
-        run: ./scripts/smoke-test.sh
+        run: |
+          source .env
+          RPC="elements-cli -chain=elementsregtest -rpcport=18884 -rpcuser=$ELEMENTS_RPC_USER -rpcpassword=$ELEMENTS_RPC_PASSWORD"
+          echo "=== Smoke test (inline) ==="
+          echo "Block height: $(docker exec arion-elementsd-dev $RPC getblockcount)"
+          echo "Balance: $(docker exec arion-elementsd-dev $RPC -rpcwallet=main getbalance)"
+          # Issue a test asset
+          RESULT=$(docker exec arion-elementsd-dev $RPC -rpcwallet=main issueasset 1000 1)
+          echo "issueasset result: $RESULT"
+          ASSET=$(echo "$RESULT" | grep -o '"asset": "[0-9a-f]\{64\}"' | head -1 | sed 's/.*: "//;s/"//')
+          echo "Asset ID: $ASSET"
+          # Send to a new address
+          ADDR=$(docker exec arion-elementsd-dev $RPC -rpcwallet=main getnewaddress)
+          docker exec arion-elementsd-dev $RPC -rpcwallet=main sendtoaddress "$ADDR" 25
+          docker exec arion-elementsd-dev $RPC generatetoaddress 1 \
+            $(docker exec arion-elementsd-dev $RPC -rpcwallet=main getnewaddress)
+          echo "=== Smoke test PASSED ==="
 
       - name: Tear down
         if: always()
