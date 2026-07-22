@@ -40,6 +40,18 @@ jobs:
           timeout 120 bash -c \
             'until docker inspect --format={{.State.Health.Status}} arion-elementsd-dev | grep -q healthy; do sleep 2; done'
 
+      - name: Mine 101 blocks to activate initialfreecoins
+        run: |
+          source .env
+          docker compose -T --profile dev exec elementsd elements-cli \
+            -chain=elementsregtest -rpcport=18884 \
+            -rpcuser="$ELEMENTS_RPC_USER" -rpcpassword="$ELEMENTS_RPC_PASSWORD" \
+            generatetoaddress 101 \
+            $(docker compose -T --profile dev exec -T elementsd elements-cli \
+              -chain=elementsregtest -rpcport=18884 \
+              -rpcuser="$ELEMENTS_RPC_USER" -rpcpassword="$ELEMENTS_RPC_PASSWORD" \
+              getnewaddress)
+
       - name: Run smoke test
         run: ./scripts/smoke-test.sh
 
