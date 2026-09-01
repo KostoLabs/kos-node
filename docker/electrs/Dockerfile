@@ -14,7 +14,7 @@
 # Le commit est épinglé : mettre à jour ELECTRS_GIT_REF consciemment.
 # ============================================================
 
-FROM rust:1.82-bookworm AS builder
+FROM rust:1.98-bookworm AS builder
 
 # Dépôt et révision épinglés du fork esplora/electrs (branche new-index).
 ARG ELECTRS_GIT_URL=https://github.com/Blockstream/electrs.git
